@@ -1,0 +1,426 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vmName": {
+      "type": "string",
+      "defaultValue": "azure-vm",
+      "metadata": {
+        "description": "name of the vm, will be used as DNS Name for the Public IP used to access the Virtual Machine"
+      }
+    },
+    "ubuntuOSVersion": {
+      "type": "string",
+      "defaultValue": "16.04.0-LTS",
+      "metadata": {
+        "description": "OS version of Ubuntu"
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "User name for the Virtual Machine"
+      }
+    },
+    "sshKeyData": {
+      "type": "string",
+      "metadata": {
+        "description": "Please copy the content of your SSH RSA public key and paste it here. You can use \"ssh-keygen -t rsa -b 2048\" to generate your SSH key pairs."
+      }
+    },
+    "tenantID": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "metadata": {
+        "description": "ID of the tenant. See https://github.com/cloudfoundry-incubator/bosh-azure-cpi-release/blob/master/docs/guidance.md"
+      }
+    },
+    "clientID": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "metadata": {
+        "description": "ID of the client. See https://github.com/cloudfoundry-incubator/bosh-azure-cpi-release/blob/master/docs/guidance.md"
+      }
+    },
+    "clientSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "secret of the client. See https://github.com/cloudfoundry-incubator/bosh-azure-cpi-release/blob/master/docs/guidance.md"
+      }
+    },
+    "_artifactsLocation": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/a09-capf/kubo-deployment/azure/docs/user-guide/platforms/azure/",
+      "metadata": {
+        "description": "The base URI where artifacts required by this template are located. When the template is deployed using the accompanying scripts, a private location in the subscription will be used and this value will be automatically generated."
+      }
+    }
+  },
+  "variables": {
+    "defaultStorageAccountName": "cfcrsa",
+    "storageAccountType": "Standard_LRS",
+    "vmStorageAccountContainerName": "vhds",
+    "storageid": "[resourceId('Microsoft.Storage/storageAccounts', variables('defaultStorageAccountName'))]",
+
+    "virtualNetworkName": "boshvnet-crp",
+    "virtualNetworkAddressSpace": "10.0.0.0/16",
+    "vnetID": "[resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]",
+    "subnetNameForDevbox": "Devbox",
+    "subnetAddressRangeForDevbox": "10.0.0.0/24",
+    "subnetRefForDevbox": "[concat(variables('vnetID'), '/subnets/', variables('subnetNameForDevbox'))]",
+    "subnetNameForCFCR": "CFCR",
+    "subnetAddressRangeForCFCR": "10.0.1.0/24",
+    "devboxNetworkSecurityGroup": "nsg-devbox",
+    "cfcrNetworkSecurityGroup": "nsg-cfcr",
+    "cfPublicIPAddressName": "[concat(parameters('vmName'), '-cfcr')]",
+    "publicIPAddressID": "[resourceId('Microsoft.Network/publicIPAddresses', variables('cfPublicIPAddressName'))]",
+    "loadBalancerName": "cfcr-lb",
+    "lbID": "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]",
+    "frontEndIPConfigID": "[concat(variables('lbID'), '/frontendIPConfigurations/LoadBalancerFrontEnd')]",
+    "lbPoolID": "[concat(variables('lbID'), '/backendAddressPools/BackendPool')]",
+    "lbProbeID": "[concat(variables('lbID'), '/probes/healthProbe')]",
+
+    "vmSize": "Standard_D1_v2",
+    "nicName": "[parameters('vmName')]",
+    "devboxPrivateIPAddress": "10.0.0.100",
+    "imagePublisher": "Canonical",
+    "imageOffer": "UbuntuServer",
+    "sshKeyPath": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+
+    "baseUriAzureCloud": "[parameters('_artifactsLocation')]",
+    "filesToDownloadAzure": [
+      "[uri(variables('baseUriAzureCloud'), 'scripts/setup_env.sh')]",
+      "[uri(variables('baseUriAzureCloud'), 'scripts/prepare_storage_account.py')]",
+      "[uri(variables('baseUriAzureCloud'), 'scripts/utils.sh')]"
+    ],
+    "templateVersion": "v3-2-0",
+    "filesToDownload": "[variables('filesToDownloadAzure')]",
+
+    "coreUriAzureCloud": "core.windows.net",
+    "coreUri": "[variables(concat('coreUri', 'AzureCloud'))]",
+
+    "environmentAzure": {
+      "serviceHostBase": "[variables('coreUri')]",
+      "boshCliUrl": "https://s3.amazonaws.com/bosh-cli-artifacts/bosh-cli-2.0.45-linux-amd64",
+      "credhubCliUrl": "https://github.com/cloudfoundry-incubator/credhub-cli/releases/download/1.4.0/credhub-linux-1.4.0.tgz",
+      "kubectlUrl": "https://storage.googleapis.com/kubernetes-release/release/v1.9.0/bin/linux/amd64/kubectl"
+    },
+    "environmentAzureCloud": "[variables('environmentAzure')]",
+    "environment": "[variables(concat('environment', 'AzureCloud'))]",
+
+    "customScriptPropertiesAzureCloud": {
+      "publisher": "Microsoft.Azure.Extensions",
+      "type": "CustomScript",
+      "typeHandlerVersion": "2.0",
+      "settings": {
+        "fileUris": "[variables('filesToDownload')]"
+      },
+      "protectedSettings": {
+        "commandToExecute": "[concat('bash -l -c \"./setup_env.sh', ' ', parameters('tenantID'), ' ', parameters('clientID'), ' ', base64(parameters('clientSecret')), ' >/home/', parameters('adminUsername'), '/install.log 2>&1\"')]"
+      }
+    },
+    "customScriptProperties": "[variables(concat('customScriptProperties', 'AzureCloud'))]"
+  },
+  "resources": [
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('cfcrNetworkSecurityGroup')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "master",
+            "properties": {
+              "description": "Allow Master",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "8443",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 200,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('devboxNetworkSecurityGroup')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "ssh",
+            "properties": {
+              "description": "Allow SSH",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 200,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[variables('defaultStorageAccountName')]",
+      "apiVersion": "2015-06-15",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "accountType": "[variables('storageAccountType')]"
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[concat(parameters('vmName'), '-devbox')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[concat(toLower(parameters('vmName')), '-', uniqueString(resourceGroup().id))]"
+        }
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('cfPublicIPAddressName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "publicIPAllocationMethod": "static"
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "[variables('virtualNetworkName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('virtualNetworkAddressSpace')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('subnetNameForDevbox')]",
+            "properties": {
+              "addressPrefix": "[variables('subnetAddressRangeForDevbox')]"
+            }
+          },
+          {
+            "name": "[variables('subnetNameForCFCR')]",
+            "properties": {
+              "addressPrefix": "[variables('subnetAddressRangeForCFCR')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[variables('nicName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/publicIPAddresses/', concat(parameters('vmName'), '-devbox'))]",
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('devboxNetworkSecurityGroup'))]"
+      ],
+      "properties": {
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('devboxNetworkSecurityGroup'))]"
+        },
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[variables('devboxPrivateIPAddress')]",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', concat(parameters('vmName'), '-devbox'))]"
+              },
+              "subnet": {
+                "id": "[variables('subnetRefForDevbox')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "generate-customdata",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2015-01-01",
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('defaultStorageAccountName'))]",
+        "[concat('Microsoft.Network/networkInterfaces/', variables('nicName'))]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[concat(variables('baseUriAzureCloud'), 'generate-customdata.json')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "customData": {
+            "value": {
+              "DEFAULT_STORAGE_ACCOUNT_NAME": "[variables('defaultStorageAccountName')]",
+              "DEFAULT_STORAGE_ACCESS_KEY": "[listKeys(variables('storageid'), '2015-06-15').key1]",
+              "ADMIN_USER_NAME": "[parameters('adminUsername')]",
+              "ENVIRONMENT": "['AzureCloud']",
+              "SERVICE_HOST_BASE": "[variables('environment').serviceHostBase]",
+              "BOSH_CLI_URL": "[variables('environment').boshCliUrl]",
+              "CREDHUB_CLI_URL": "[variables('environment').credhubCliUrl]",
+              "KUBECTL_URL": "[variables('environment').kubectlUrl]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "name": "[variables('loadBalancerName')]",
+      "type": "Microsoft.Network/loadBalancers",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/publicIPAddresses/', variables('cfPublicIPAddressName'))]"
+      ],
+      "properties": {
+        "frontendIPConfigurations": [
+          {
+            "name": "LoadBalancerFrontEnd",
+            "properties": {
+              "publicIPAddress": {
+                "id": "[variables('publicIPAddressID')]"
+              }
+            }
+          }
+        ],
+        "backendAddressPools": [
+          {
+            "name": "BackendPool"
+          }
+        ],
+        "loadBalancingRules": [
+          {
+            "name": "master",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[variables('frontEndIPConfigID')]"
+              },
+              "backendAddressPool": {
+                "id": "[variables('lbPoolID')]"
+              },
+              "protocol": "tcp",
+              "frontendPort": 8443,
+              "backendPort": 8443,
+              "enableFloatingIP": false,
+              "idleTimeoutInMinutes": 15,
+              "probe": {
+                "id": "[variables('lbProbeID')]"
+              }
+            }
+          }
+        ],
+        "probes": [
+          {
+            "name": "healthProbe",
+            "properties": {
+              "protocol": "tcp",
+              "port": 8443,
+              "intervalInSeconds": 5,
+              "numberOfProbes": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiversion": "2015-06-15",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[parameters('vmName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "Microsoft.Resources/deployments/generate-customdata"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('vmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[parameters('vmName')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "linuxConfiguration": {
+            "disablePasswordAuthentication": true,
+            "ssh": {
+              "publicKeys": [
+                {
+                  "path": "[variables('sshKeyPath')]",
+                  "keyData": "[parameters('sshKeyData')]"
+                }
+              ]
+            }
+          },
+          "customData": "[reference('Microsoft.Resources/deployments/generate-customdata', '2015-01-01').outputs.customData.value]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('imagePublisher')]",
+            "offer": "[variables('imageOffer')]",
+            "sku": "[parameters('ubuntuOSVersion')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "osdisk",
+            "vhd": {
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('defaultStorageAccountName')), '2015-06-15').primaryEndpoints.blob, variables('vmStorageAccountContainerName'), '/', parameters('vmName'), '-osdisk.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(parameters('vmName'), '/CustomScript')]",
+      "apiVersion": "2015-06-15",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/loadBalancers/', variables('loadBalancerName'))]",
+        "[concat('Microsoft.Compute/virtualMachines/', parameters('vmName'))]"
+      ],
+      "properties": "[variables('customScriptProperties')]"
+    }
+  ],
+  "outputs": {
+    "sshDevBox": {
+      "type": "string",
+      "value": "[concat('ssh ', parameters('adminUsername'), '@', reference(concat('Microsoft.Network/publicIPAddresses/', parameters('vmName'), '-devbox')).dnsSettings.fqdn)]"
+    },
+    "cloudFoundryIP": {
+      "type": "string",
+      "value": "[reference(concat(parameters('vmName'), '-cfcr')).ipAddress]"
+    }
+  }
+}

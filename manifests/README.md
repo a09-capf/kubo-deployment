@@ -203,6 +203,8 @@ kubectl get all
 | **gcp** | | |
 | [`iaas/gcp/add-service-key-master.yml`](iaas/gcp/add-service-key-master.yml) | Allow user to specify GCP key instead of service account |  |
 | [`iaas/gcp/add-service-key-worker.yml`](iaas/gcp/add-service-key-worker.yml) | Allow user to specify GCP key instead of service account |  |
+| **Azure** | | |
+| [`iaas/azure/master-static-ip.yml`](iaas/azure/master-static-ip.yml) | Attach floating IP to Kube API | Assign allocated floating IP to `master` instance. |
 ### Infrastructure
 
 | Name | Purpose | Notes |
@@ -217,6 +219,8 @@ kubectl get all
 | **vSphere** | | |
 | [`iaas/vsphere/cloud-provider.yml`](iaas/vsphere/cloud-provider.yml) | Enable Cloud Provider for vSphere | - |
 | [`iaas/vsphere/set-working-dir-no-rp.yml`](iaas/vsphere/set-working-dir-no-rp.yml) | Configure vSphere cloud provider's working dir if there is no resource pool | - |
+| **Azure** | | |
+| N/A | | |
 
 
 ### Proxy

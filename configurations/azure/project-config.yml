@@ -1,0 +1,6 @@
+vnet_name: boshvnet-crp # Azure Virtual Network Name
+subnet_name: CFCR # Azure Subnet Name
+subscription_id: # Azure Subscription ID
+resource_group_name: # Azure Resource Group Name
+storage_account_name: cfcrsa # Azure Storage Account Name
+default_security_group: nsg-cfcr # Azure Network Security Group

@@ -102,6 +102,9 @@ upload_stemcell() {
    "aws")
     bosh-cli upload-stemcell "https://s3.amazonaws.com/bosh-aws-light-stemcells/light-bosh-stemcell-${stemcell_version}-aws-xen-hvm-ubuntu-trusty-go_agent.tgz"
     ;;
+   "azure")
+    bosh-cli upload-stemcell "https://s3.amazonaws.com/bosh-core-stemcells/azure/bosh-stemcell-${stemcell_version}-azure-hyperv-ubuntu-trusty-go_agent.tgz"
+    ;;
   esac
 }
 
